@@ -1,4 +1,4 @@
-# Node InSim - InSim connection to multiple hosts (TypeScript + ES Modules)
+# Node InSim - InSim connection (TypeScript + ES Modules)
 
 ## Requirements
 
