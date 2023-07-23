@@ -118,10 +118,75 @@ const checkPos = (polySides: number, polyX: number[], polyY: number[], x: number
 // import FE from './json/FE.json';
 // import KY from './json/KY.json';
 // import SO from './json/SO.json';
-import WE from './json/WE.json';
+import WE from './Layout/Map/WE.json';
+import WE3D from './Layout/3DGps/WE.json';
 import Connections from './connections.js';
 
 const resources = { ...WE }; //...AS, ...BL, ...FE, ...KY, ...SO,
+
+// JSON verisini kullanarak fonksiyonu çağırıyoruz
+const arrowCoordinates = { ...WE3D };
+
+interface RelationData {
+  [key: string]: number;
+}
+
+interface ArrowCoordinate {
+  x: number;
+  y: number;
+  relation: RelationData;
+}
+
+const getDistance = (x1: number, y1: number, x2: number, y2: number): number =>
+  Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
+
+const degreesToNearestDirection = (angle: number, data: ArrowCoordinate[]): number => {
+  let nearestDirection = -1;
+  let minAngleDifference = 360;
+
+  for (const arrow of data) {
+    for (const directionKey in arrow.relation) {
+      const direction = Number(directionKey);
+      const arrowAngle = arrow.relation[direction];
+      const angleDifference = Math.abs(arrowAngle - angle);
+      if (angleDifference < minAngleDifference) {
+        minAngleDifference = angleDifference;
+        nearestDirection = direction;
+      }
+    }
+  }
+
+  return nearestDirection;
+};
+
+const getNearestRelationToPoint = (x: number, y: number, data: ArrowCoordinate[]): RelationData | null => {
+  let minDistance = Number.MAX_VALUE;
+  let nearestRelation: ArrowCoordinate | null = null;
+
+  for (const arrow of data) {
+    const arrowX = arrow.x;
+    const arrowY = arrow.y;
+    const currentDistance = getDistance(x, y, arrowX, arrowY);
+
+    if (currentDistance < minDistance) {
+      minDistance = currentDistance;
+      nearestRelation = arrow;
+    }
+  }
+
+  return nearestRelation ? nearestRelation.relation : null;
+};
+
+const getNewCoordinates = (x: number, y: number, direction: number, distance: number): { x: number; y: number } => {
+  const angleInRadians = (direction - 90) * (Math.PI / 180);
+  const newX = x + distance * Math.cos(angleInRadians);
+  const newY = y + distance * Math.sin(angleInRadians);
+  return { x: newX, y: newY };
+};
+
+// Hedef koordinatları
+const targetX = -364;
+const targetY = 746;
 
 const multiCarInfo = (packet: IS_MCI, inSim: InSim) => {
 
@@ -129,13 +194,14 @@ const multiCarInfo = (packet: IS_MCI, inSim: InSim) => {
     var conn = connections[getConnIdx(m.PLID, false)];
     let kmh = m.Speed / 91;
     let mph = m.Speed / 146;
-    let direction = m.Direction / 180;
+    let direction2 = m.Direction / 180;
     let pathx = m.X / 65536;
     let pathy = m.Y / 65536;
     let pathz = m.Z / 65536;
     let angle = m.AngVel * 360 / 16384;
     let heading = m.Heading * 180.0 / 32768.0;
     conn.wayDedect = false;
+
     resources.WE.map((s) => {
       if (checkPos(s.X?.length, s.X, s.Y, pathx, pathy)) {
         conn.wayDedect = true;
@@ -144,14 +210,41 @@ const multiCarInfo = (packet: IS_MCI, inSim: InSim) => {
     })
     if (!conn.wayDedect)
       inSim.send(new IS_BTN({ Text: `^0Invalid Path ^350 km/h`, H: 5, L: 170, T: 8, W: 29, BStyle: ButtonStyle.ISB_DARK, UCID: conn.ucid, ReqI: 255, ClickID: 1 }));
-    inSim.send(new IS_BTN({ Text: `${kmh?.toFixed(0)} Speed`, H: 5, L: 40, T: 40, W: 30, BStyle: ButtonStyle.ISB_DARK, UCID: conn.ucid, ReqI: 255, ClickID: 2 }));
-    //   resources.WE.map((s) => {
-    //     if (checkPos(s.X?.length, s.X, s.Y, m.X / 65536, m.Y / 65536)) {
-    //       inSim.send(new IS_BTN({ Text: `^7${s.name} ^2${s.speedLimit}km/h`, H: 5, L: 170, T: 8, W: 29, BStyle: ButtonStyle.ISB_DARK, UCID: 255, ReqI: 255, ClickID: 1 }));
-    //     }
-    //   })
-    //   const SpeedMS: number = (m.Speed / 91);
-    //   inSim.send(new IS_BTN({ Text: `${SpeedMS?.toFixed(0)} Speed`, H: 5, L: 40, T: 40, W: 30, BStyle: ButtonStyle.ISB_DARK, UCID: 255, ReqI: 255, ClickID: 2 }));
+    inSim.send(new IS_BTN({ Text: `${kmh?.toFixed(0)} Speed`, H: 5, L: 40, T: 190, W: 10, BStyle: ButtonStyle.ISB_DARK, UCID: conn.ucid, ReqI: 255, ClickID: 2 }));
+
+    const nearestRelation = getNearestRelationToPoint(targetX, targetY, WE3D);
+    if (nearestRelation) {
+      const nearestDirection = degreesToNearestDirection(Object.values(nearestRelation)[0], WE3D);
+    } else {
+      inSim.send(new IS_BTN({ Text: "Hedefe ulaşmak için verilen verilere göre uygun relation bulunamadı.", H: 10, L: 25, T: 10, W: 100, BStyle: ButtonStyle.ISB_DARK, UCID: conn.ucid, ReqI: 255, ClickID: 25 }));
+    }
+
+    const distance = getDistance(pathx, pathy, targetX, targetY);
+    const direction = degreesToNearestDirection(Math.atan2(targetY - pathy, targetX - pathx) * (180 / Math.PI), WE3D);
+    const newCoordinates = getNewCoordinates(pathx, pathy, direction, distance);
+    console.log("Yeni Koordinatlar: ", newCoordinates);
+
+    let directionName = "";
+    if (direction >= 337.5 || direction < 22.5) {
+      directionName = "↑ Kuzey";
+    } else if (direction >= 22.5 && direction < 67.5) {
+      directionName = "↗ Kuzeydoğu";
+    } else if (direction >= 67.5 && direction < 112.5) {
+      directionName = "→ Doğu";
+    } else if (direction >= 112.5 && direction < 157.5) {
+      directionName = "↘ Güneydoğu";
+    } else if (direction >= 157.5 && direction < 202.5) {
+      directionName = "↓ Güney";
+    } else if (direction >= 202.5 && direction < 247.5) {
+      directionName = "↙ Güneybatı";
+    } else if (direction >= 247.5 && direction < 292.5) {
+      directionName = "← Batı";
+    } else if (direction >= 292.5 && direction < 337.5) {
+      directionName = "↖ Kuzeybatı";
+    }
+
+    inSim.send(new IS_BTN({ Text: `Car's new direction: ${directionName} degrees`, H: 10, L: 25, T: 10, W: 100, BStyle: ButtonStyle.ISB_DARK, UCID: conn.ucid, ReqI: 255, ClickID: 25 }));
+
   });
 };
 
